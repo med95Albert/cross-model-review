@@ -1,0 +1,39 @@
+{
+  "pass_rule": {"traps": "all", "clean_min": 1},
+  "cases": {
+    "trap-ghost-module": {
+      "type": "trap",
+      "verdict": "ISSUES FOUND",
+      "must_hit": ["scroll-observer"],
+      "capability": "證偽式讀 codebase（幽靈模組）"
+    },
+    "trap-undelivered-goal": {
+      "type": "trap",
+      "verdict": "ISSUES FOUND",
+      "must_hit": ["稽核|audit"],
+      "capability": "目標-交付完整性比對"
+    },
+    "trap-secret-leak": {
+      "type": "trap",
+      "verdict": "ISSUES FOUND",
+      "must_hit": ["SERVICE_ROLE|NEXT_PUBLIC"],
+      "capability": "安全判斷（金鑰洩前端）"
+    },
+    "trap-unsafe-fallback": {
+      "type": "trap",
+      "verdict": "ISSUES FOUND",
+      "must_hit": ["401|403|4xx|unauthoriz|forbidden|權限|revok"],
+      "capability": "錯誤分類邏輯（來自真實品質測試 r3 的教訓）"
+    },
+    "clean-copy-link": {
+      "type": "clean",
+      "verdict": "APPROVED",
+      "capability": "假陽性方向：不亂抓乾淨的小計劃（單檔網頁，空倉庫自足）"
+    },
+    "clean-wordcount-cli": {
+      "type": "clean",
+      "verdict": "APPROVED",
+      "capability": "假陽性方向：不亂抓乾淨的 CLI 小工具（零相依，空倉庫自足）"
+    }
+  }
+}
