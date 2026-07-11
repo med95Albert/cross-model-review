@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "cross-model-review",
-      "source": ".",
+      "source": "./",
       "description": "跨模型互審閘門 — 證偽式逐輪審查＋Stop hook 強制＋裁判校準 fail-closed。",
       "version": "1.1.1",
       "skills": [
