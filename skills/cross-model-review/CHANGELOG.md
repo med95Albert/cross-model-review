@@ -1,5 +1,7 @@
 # cross-model-review 版本史
 
+- **v1.1.1 (2026-07-09)**: 校準模型綁定。使用者換裁判模型（gpt-5.5 → gpt-5.6-sol）時發現的洞：calibration 只綁 codex CLI 版本，純換 config.toml 的 model 不會失效——但換模型＝換裁判。修法：calibrate.sh 記錄 `model`（讀 config.toml，`CROSS_REVIEW_JUDGE_MODEL` 可覆蓋）；`--calibration-check` 比對現行模型，不符或紀錄缺欄（舊格式）即 invalid；迴歸 M5c/M5d。本次順帶：codex CLI 0.142.3→0.144.1（0.142 不認得 5.6-sol，會以 fallback metadata 劣化執行）。教訓：**裁判的識別＝CLI 版本×模型**，缺一不可。
+
 - **v1.1 (2026-07-08)**: 裁判校準層（與同行交流「跨模型互審方法論」後的移植）。①**黃金集校準＋fail-closed**：`calibrate.sh`＋`gold-seed/`（4 雷題各測一種能力＋2 乾淨題測假陽性方向——之前只測「會不會漏抓」從沒測「會不會亂抓」）→ `calibration.json`（效期 30 天、codex 換版即失效）；probe 回報 POSTURE，RED＝所有工件視同 🔴（APPROVED 後仍需人工簽核）。②**仲裁→黃金集飛輪**：Step 7 仲裁與被人推翻的簽核歸檔 `gold-candidates/`（僅「人類獨立定讞」入集；「人同意 AI」不算獨立訊號——同行的獨立錨點紀律）。③**防作弊**：Gate 4 新增 D9（ledger 稱 CONCEDE 必須在 r*.txt 找得到原文，防代筆）＋D10（校準狀態，WARN=升級簽核）；held-out 與逐題留檔防校準過擬合。④誠實界線 #7（跨模型可能一起錯——同行實測）＋#8（校準是姿態級非逐審級；hook 不驗校準）。⑤RESOLVED-CAPITULATED 明文不得作為審查有效之證據。刻意不搬：一次性 JSON 判決（對文件審查是退步）、自動優化迴圈（風險集中處）。
   ⑥dogfood v1.1（codex 三輪 APPROVED）：R1 五條全修——RED 姿態機械化（signoff.txt＋D10 三態＋D11）、--state-root 統一、仲裁三處一致＋D8 升 FAIL、D9 改計數下界、校準 runs/ 逐題落檔＋history；R2 三條全修——證據綁版（meta.sha＝marker.sha，hook 與 D12 雙驗，攻擊迴歸 C4）、D11 tier 必填不 fail-open、wordcount 夾具改 OSError 總類。基線三跑：FAIL（乾淨題不自足，0/2）→ PASS（5/6 容忍已知瑕疵，被 codex 抓）→ **PASS（6/6 乾淨）**。合成測試 52 案例全綠。黃金集首批教訓：乾淨題須「空倉庫自足」；容忍額度是給裁判偶發挑剔的，不是給已知壞題的；審查者會親讀活體狀態檔——它驗的是現實不是說法。
 

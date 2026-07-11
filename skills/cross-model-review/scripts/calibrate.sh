@@ -16,6 +16,23 @@ GOLD="${STATE_ROOT}/gold"
 
 command -v codex >/dev/null 2>&1 || { echo "codex CLI 不存在——無法校準"; exit 2; }
 CODEX_VER="$(codex --version 2>/dev/null | head -1)"
+[ -z "${CODEX_VER}" ] && { echo "ERROR: 無法取得 codex 版本——裁判身分三要素不得缺席，拒絕產出校準紀錄。"; exit 2; }
+# 只讀 config.toml——codex exec 實際用的就是它；env 變數不得影響「記錄什麼」（防記錄與真裁判脫鉤）
+JUDGE_ID="$(python3 - "${GATE}" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+print(g.current_judge_model() + "\t" + g.current_judge_effort())
+PY
+)"
+JUDGE_MODEL="${JUDGE_ID%%$'\t'*}"
+JUDGE_EFFORT="${JUDGE_ID##*$'\t'}"
+if [ -z "${JUDGE_MODEL}" ]; then
+  echo "ERROR: 無法識別裁判模型——請在 ~/.codex/config.toml 設定 model=\"...\"（codex 實際用誰、就記誰、就驗誰）。"
+  echo "（缺模型識別的校準紀錄一律視為無效，直接失敗比產出立即無效的基線誠實。）"
+  exit 2
+fi
+echo "裁判：${CODEX_VER}／model=${JUDGE_MODEL}@${JUDGE_EFFORT}"
 
 if [ ! -d "${GOLD}/cases" ]; then
   mkdir -p "${GOLD}"
@@ -87,7 +104,7 @@ CODEX_EOF
   fi
 done < "${TSV}"
 
-python3 - "${RES}" "${STATE_ROOT}/calibration.json" "${CODEX_VER}" "${RUNDIR}" <<'PY'
+python3 - "${RES}" "${STATE_ROOT}/calibration.json" "${CODEX_VER}" "${RUNDIR}" "${JUDGE_MODEL}" "${JUDGE_EFFORT}" <<'PY'
 import json, sys, datetime, os
 rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
 cases = {r[0]: {"type": r[1], "got": r[2], "pass": r[3] == "pass",
@@ -95,11 +112,13 @@ cases = {r[0]: {"type": r[1], "got": r[2], "pass": r[3] == "pass",
 traps = [c for c in cases.values() if c["type"] == "trap"]
 clean = [c for c in cases.values() if c["type"] == "clean"]
 traps_pass = bool(traps) and all(c["pass"] for c in traps)
-clean_pass = (not clean) or any(c["pass"] for c in clean)
+clean_pass = bool(clean) and any(c["pass"] for c in clean)  # 零乾淨題＝假陽性方向未測，不得 PASS
 overall = "PASS" if (traps_pass and clean_pass) else "FAIL"
 out = {
     "date": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "codex_version": sys.argv[3],
+    "model": sys.argv[5],
+    "effort": sys.argv[6],
     "valid_days": 30,
     "run_dir": sys.argv[4],
     "cases": cases,
@@ -112,10 +131,10 @@ json.dump(out, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False, ind
 hist = os.path.join(os.path.dirname(sys.argv[4]), "history.log")
 with open(hist, "a", encoding="utf-8") as h:
     detail = ",".join(f"{k}:{'P' if v['pass'] else 'F'}" for k, v in sorted(cases.items()))
-    h.write(f"{out['date']} | {sys.argv[3]} | {overall} | {detail}\n")
+    h.write(f"{out['date']} | {sys.argv[3]} | {sys.argv[5]}@{sys.argv[6]} | {overall} | {detail}\n")
 print("————")
 print(f"雷題：{'全中' if traps_pass else '有漏'}（{sum(c['pass'] for c in traps)}/{len(traps)}）"
       f"｜乾淨題：{sum(c['pass'] for c in clean)}/{len(clean)} 過（需 ≥1）")
-print(f"校準結果：{overall}（已寫入 {sys.argv[2]}，效期 30 天，codex={sys.argv[3]}）")
+print(f"校準結果：{overall}（已寫入 {sys.argv[2]}，效期 30 天，codex={sys.argv[3]}／model={sys.argv[5]}@{sys.argv[6]}）")
 sys.exit(0 if overall == "PASS" else 1)
 PY

@@ -6,7 +6,7 @@ set -euo pipefail
 CLAUDE_DIR="${HOME}/.claude"
 SKILL_DEST="${CLAUDE_DIR}/skills/cross-model-review"
 SETTINGS="${CLAUDE_DIR}/settings.json"
-STATE_ROOT="${CLAUDE_DIR}/cross-model-review"
+STATE_ROOT="${CROSS_REVIEW_STATE_ROOT:-${CLAUDE_DIR}/cross-model-review/state}"
 PURGE="${1:-}"
 
 say(){ printf '%s\n' "$*"; }
@@ -49,7 +49,7 @@ say "✓ 已移除 skill 目錄 ${SKILL_DEST}"
 
 if [ "${PURGE}" = "--purge" ]; then
   rm -rf "${STATE_ROOT}"
-  say "✓ 已刪除審查證據 ${STATE_ROOT}"
+  say "✓ 已刪除審查證據 ${STATE_ROOT}""（含 CROSS_REVIEW_STATE_ROOT 指定位置）"
 else
   say "（保留審查證據 ${STATE_ROOT}；要一併刪除請加 --purge）"
 fi

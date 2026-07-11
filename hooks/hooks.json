@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/review-gate.py\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/cross-model-review/scripts/review-gate.py\""
           }
         ]
       }

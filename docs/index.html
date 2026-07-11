@@ -142,7 +142,7 @@
     <ul>
       <li><b>事故驅動進化</b>——每發現一次漏抓或誤報，就新增一條自動檢查＋一條迴歸測試，錯誤不二犯。上線第一天它就抓到自己兩個誤報，當天修掉，測試從 <span class="num">20</span> 條長到 <span class="num">31</span> 條。</li>
       <li><b>審查帳本全落盤</b>——每次審查的爭點、誰讓步、幾輪收斂，全部存檔可回顧：哪類問題反覆出現、審查方哪類意見常被推翻，都有據可查。</li>
-      <li><b>稽核稽核者</b>——一份埋了 3 個已知地雷的假計劃當「考卷」，定期丟給審查方重考（例如它換版本後），驗證它還抓得到全部地雷。目前基線：<span class="num">3/3</span> 全中。</li>
+      <li><b>稽核稽核者</b>——一套黃金考卷定期考裁判（例如它換版本、換模型後）：<span class="num">4</span> 題各埋一種已知地雷、<span class="num">2</span> 題乾淨無雷，前者驗「抓得到」、後者驗「不亂抓」。未通過即 fail-closed（審查照跑，放行需人工簽核）。目前基線：<span class="num">6/6</span> 全中。</li>
     </ul>
   </section>
 
@@ -164,7 +164,7 @@
     <p class="eyebrow">INSTALL・怎麼安裝</p>
     <h2>一句話就裝好</h2>
     <p class="sub">打開 Claude Code，把下面這句話貼給它——clone、放對位置、註冊守門程式，全部由 Claude 代勞：</p>
-    <div class="quote" style="font-size:14px;background:#fff;border:1px solid var(--line);border-left:3px solid var(--cinnabar);border-radius:6px;padding:14px 18px">幫我把 github.com/med95Albert/cross-model-review 這個技能裝到 ~/.claude/skills/cross-model-review，然後執行裡面的 install.sh 完成 Stop hook 註冊</div>
+    <div class="quote" style="font-size:14px;background:#fff;border:1px solid var(--line);border-left:3px solid var(--cinnabar);border-radius:6px;padding:14px 18px">幫我 clone github.com/med95Albert/cross-model-review 到一個暫存資料夾，然後執行裡面的 install.sh 完成安裝</div>
     <p class="sub" style="font-size:14px">裝完重開一個 Claude Code session 即生效。偏好原生外掛的話：<code>/plugin marketplace add med95Albert/cross-model-review</code> → <code>/plugin install cross-model-review@cross-model-review</code>。前置需求：Claude Code＋Python 3＋（建議）已登入的 OpenAI Codex CLI。原始碼與完整說明在 <a href="https://github.com/med95Albert/cross-model-review">GitHub</a>。</p>
   </section>
 

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# cross-model-review 一鍵安裝器（根目錄即技能佈局）
-# 兩種執行情境皆支援：
-#   A) repo 已被 clone 到 ~/.claude/skills/cross-model-review（一句話安裝路徑）→ 原地註冊，跳過複製
-#   B) repo 在任何其他位置（下載解壓／clone 到別處）→ 複製 skill 後註冊
+# cross-model-review 一鍵安裝器（標準 skills/<name>/ 佈局）
+# 在任何位置執行皆可：從 repo 的 skills/cross-model-review/ 複製到 ~/.claude/skills/ 並註冊 hook
 # 全程只寫入你自己的 ~/.claude/，可安全重複執行（idempotent）。
 set -euo pipefail
 
@@ -20,7 +18,8 @@ say "== cross-model-review 安裝器 v1.1 =="
 
 command -v python3 >/dev/null 2>&1 || die "找不到 python3——閘門與腳本需要它，請先安裝 Python 3。"
 say "✓ python3：$(python3 --version 2>&1)"
-[ -f "${SELF_DIR}/SKILL.md" ] || die "找不到 ${SELF_DIR}/SKILL.md（請在 repo 資料夾內執行本腳本）。"
+SKILL_SRC="${SELF_DIR}/skills/cross-model-review"
+[ -f "${SKILL_SRC}/SKILL.md" ] || die "找不到 ${SKILL_SRC}/SKILL.md（請在 repo 資料夾內執行本腳本）。"
 
 if command -v codex >/dev/null 2>&1; then
   say "✓ codex CLI：$(codex --version 2>&1 | head -1)"
@@ -35,31 +34,34 @@ fi
 
 mkdir -p "${CLAUDE_DIR}"
 
-if [ "${SELF_DIR}" = "${SKILL_DEST}" ]; then
-  say "✓ 偵測到 repo 已在 ${SKILL_DEST}（一句話安裝路徑）——原地使用，跳過複製"
-else
-  mkdir -p "${SKILL_DEST}/scripts"
-  cp "${SELF_DIR}/SKILL.md" "${SELF_DIR}/CHANGELOG.md" "${SKILL_DEST}/"
-  cp "${SELF_DIR}/scripts/"*.py "${SELF_DIR}/scripts/"*.sh "${SKILL_DEST}/scripts/"
-  rm -rf "${SKILL_DEST}/scripts/gold-seed"
-  cp -R "${SELF_DIR}/scripts/gold-seed" "${SKILL_DEST}/scripts/"
-  say "✓ skill 已複製到 ${SKILL_DEST}"
-fi
+mkdir -p "${SKILL_DEST}/scripts"
+cp "${SKILL_SRC}/SKILL.md" "${SKILL_SRC}/CHANGELOG.md" "${SKILL_DEST}/"
+cp "${SKILL_SRC}/scripts/"*.py "${SKILL_SRC}/scripts/"*.sh "${SKILL_DEST}/scripts/"
+rm -rf "${SKILL_DEST}/scripts/gold-seed"
+cp -R "${SKILL_SRC}/scripts/gold-seed" "${SKILL_DEST}/scripts/"
+cp "${SELF_DIR}/uninstall.sh" "${SELF_DIR}/selftest.sh" "${SKILL_DEST}/" 2>/dev/null || true
+chmod +x "${SKILL_DEST}/uninstall.sh" "${SKILL_DEST}/selftest.sh" 2>/dev/null || true
+say "✓ skill 已複製到 ${SKILL_DEST}（含 uninstall.sh／selftest.sh 常駐維運工具）"
 chmod +x "${SKILL_DEST}/scripts/"*.sh "${SKILL_DEST}/scripts/"*.py
 
 mkdir -p "${STATE_DIR}"
 say "✓ 審查證據目錄：${STATE_DIR}"
 
+set +e
 RESULT="$(python3 - "${SETTINGS}" "${HOOK_CMD}" <<'PY'
 import json, os, sys
 path, cmd = sys.argv[1], sys.argv[2]
 try:
     with open(path, encoding="utf-8") as f:
         cfg = json.load(f)
-    if not isinstance(cfg, dict):
-        cfg = {}
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     cfg = {}
+except json.JSONDecodeError as e:
+    print(f"SETTINGS_CORRUPT: {e}", file=sys.stderr)
+    sys.exit(3)
+if not isinstance(cfg, dict):
+    print("SETTINGS_CORRUPT: root is not an object", file=sys.stderr)
+    sys.exit(3)
 hooks = cfg.setdefault("hooks", {})
 if not isinstance(hooks, dict):
     hooks = cfg["hooks"] = {}
@@ -83,6 +85,11 @@ with open(path, "w", encoding="utf-8") as f:
 print("updated" if found else "added")
 PY
 )"
+merge_rc=$?
+set -e
+if [ "${merge_rc}" -ne 0 ]; then
+  die "偵測到 ${SETTINGS} 已損壞（非合法 JSON 或根非物件）。為保護你的既有設定，安裝器不會覆寫它——請先手動修復該檔再重跑。原檔未被更動。"
+fi
 if [ "${RESULT}" = "added" ]; then
   say "✓ Stop hook 已註冊於 ${SETTINGS}"
 else
@@ -103,5 +110,5 @@ say "① 重開一個 Claude Code session 讓 hook 生效。"
 say "② 建議首跑裁判校準（約 6 次 codex 呼叫）：bash \"${SKILL_DEST}/scripts/calibrate.sh\""
 say "   未校準時系統 fail-closed：審查照跑，但 APPROVED 仍需你簽核。"
 say "③ 驗證：請 Claude 在任意專案 plans/ 下寫一份 .md，回合結束應被攔下審查。"
-say "④ 進階自測（52 條，零 token）：bash \"${SELF_DIR}/selftest.sh\""
-say "⑤ 解除安裝：bash \"${SELF_DIR}/uninstall.sh\"（--purge 連證據一併刪）"
+say "④ 進階自測（零 token，結尾自報條數）：bash \"${SKILL_DEST}/selftest.sh\""
+say "⑤ 解除安裝：bash \"${SKILL_DEST}/uninstall.sh\"（--purge 連證據一併刪）"

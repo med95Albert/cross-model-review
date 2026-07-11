@@ -7,11 +7,13 @@ say(){ printf '%s\n' "$*"; }
 
 if ! command -v codex >/dev/null 2>&1; then
   say "－ codex CLI 不存在"
+  say "  → 備援 subagent 無校準背書：一律 fail-closed（APPROVED 後仍需人工簽核）"
+  say "POSTURE=RED"
   say "REVIEWER=subagent"; exit 1
 fi
 say "＋ codex: $(command -v codex)（$(codex --version 2>/dev/null | head -1)）"
 
-H=$(codex exec --help 2>&1) || { say "－ codex exec --help 失敗"; say "REVIEWER=subagent"; exit 1; }
+H=$(codex exec --help 2>&1) || { say "－ codex exec --help 失敗"; say "POSTURE=RED"; say "REVIEWER=subagent"; exit 1; }
 for f in "--json" "resume" "--output-last-message" "--sandbox" "--skip-git-repo-check"; do
   if printf '%s' "$H" | grep -q -- "$f"; then say "＋ 支援 $f"; else say "－ 不支援 $f"; ok=0; fi
 done
@@ -36,4 +38,10 @@ else
   say "POSTURE=RED"
 fi
 
-if [ "$ok" -eq 1 ]; then say "REVIEWER=codex"; exit 0; else say "REVIEWER=subagent"; exit 1; fi
+if [ "$ok" -eq 1 ]; then
+  say "REVIEWER=codex"; exit 0
+else
+  say "  → 旗標不齊，降級 subagent：無校準背書，一律 POSTURE=RED"
+  say "POSTURE=RED"
+  say "REVIEWER=subagent"; exit 1
+fi

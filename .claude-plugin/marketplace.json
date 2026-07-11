@@ -1,13 +1,19 @@
 {
   "name": "cross-model-review",
   "description": "跨模型互審閘門的市集（單一 plugin）。",
-  "owner": { "name": "楊為傑", "url": "https://github.com/med95Albert" },
+  "owner": {
+    "name": "楊為傑",
+    "url": "https://github.com/med95Albert"
+  },
   "plugins": [
     {
       "name": "cross-model-review",
       "source": ".",
       "description": "跨模型互審閘門 — 證偽式逐輪審查＋Stop hook 強制＋裁判校準 fail-closed。",
-      "version": "1.1.0"
+      "version": "1.1.1",
+      "skills": [
+        "./skills/cross-model-review"
+      ]
     }
   ]
 }

@@ -27,6 +27,8 @@ else
   fail "[D2] sha 不符或無有效 marker——marker 之後改過內容？完成所有編輯後重新 finalize，或重審"
 fi
 
+RVR=""
+[ -n "$RDIR" ] && [ -f "$RDIR/meta.json" ] && RVR=$(grep -oE '"reviewer" *: *"[^"]+"' "$RDIR/meta.json" | head -1 | cut -d'"' -f4)
 if [ -n "$RDIR" ] && [ -f "$RDIR/ledger.md" ]; then
   # D3 ledger 無未解 MAINTAIN（OPEN）
   if grep -q '| *OPEN *|' "$RDIR/ledger.md"; then
@@ -73,8 +75,14 @@ if [ -n "$RDIR" ] && [ -f "$RDIR/ledger.md" ]; then
   # v1.1 R1 審查後升為 FAIL：仲裁而無歧見紀錄＝協定違規，不是提醒級
   MV=$(grep -oE '<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *-->' "$FILE" \
        | tail -1 | grep -oE 'verdict=[a-z]+' | cut -d= -f2)
-  if [ "${MV:-}" = "arbitrated" ] && [ ! -f "$RDIR/DISAGREEMENT_REPORT.md" ]; then
-    fail "[D8] marker verdict=arbitrated 但無 DISAGREEMENT_REPORT.md——仲裁必須留歧見紀錄"
+  if [ "${MV:-}" = "arbitrated" ]; then
+    # 仲裁三要件（v1.1.1b R2）：歧見報告＋至少一列 ARBITRATED 裁決＋使用者簽核原文
+    [ -f "$RDIR/DISAGREEMENT_REPORT.md" ] || fail "[D8] 仲裁缺 DISAGREEMENT_REPORT.md"
+    grep -q 'ARBITRATED' "$RDIR/ledger.md" || fail "[D8] 仲裁但 ledger 無任何 ARBITRATED-* 裁決列"
+    [ -s "$RDIR/signoff.txt" ] || fail "[D8] 仲裁缺 signoff.txt——人裁必留簽核原文（不分 tier/姿態）"
+    if [ -f "$RDIR/DISAGREEMENT_REPORT.md" ] && grep -q 'ARBITRATED' "$RDIR/ledger.md" && [ -s "$RDIR/signoff.txt" ]; then
+      pass "[D8] 仲裁三要件齊備（報告＋裁決列＋簽核）"
+    fi
   fi
   # D11 風險層級＋簽核工件：meta.json 必須有合法 tier（red|yellow）；red 必附 signoff.txt
   #（R2 審查：缺漏／亂填 tier 不得 fail-open——否則 🔴 工件漏填就繞過簽核）
@@ -92,6 +100,13 @@ if [ -n "$RDIR" ] && [ -f "$RDIR/ledger.md" ]; then
       *)
         fail "[D11] meta.json 缺 tier 或非法值（需 red|yellow，現值='${TIER:-}'）——風險分級不得留白" ;;
     esac
+  fi
+  # D13 審查者身分綁定：marker 的 reviewer 欄必須等於 meta.json 的 reviewer（v1.1.1 審查：防兩處各說各話）
+  MRV=$(grep -oE '<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *-->' "$FILE"        | tail -1 | grep -oE 'reviewer=[^ ]+' | cut -d= -f2)
+  if [ -n "${MRV:-}" ] && [ -n "${RVR:-}" ] && [ "${MRV}" = "${RVR}" ]; then
+    pass "[D13] 審查者身分一致（marker＝meta：${MRV}）"
+  else
+    fail "[D13] 審查者身分不一致：marker=${MRV:-缺} vs meta=${RVR:-缺}"
   fi
   # D12 證據綁版本：meta.json 的 sha 必須等於 marker 的 sha（R2 審查：舊證據不得掩護新內容）
   MSHA=$(grep -oE '<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *-->' "$FILE" \
@@ -140,6 +155,21 @@ PYEOF
 #   強制鏈經由既有證據四要件流動，hook 本身仍不碰校準、保持 fail-open）
 CALMSG=$(python3 "$GATE" --calibration-check 2>&1)
 calrc=$?
+# 校準是「codex 裁判」的背書——且只背書「被校準的那一位」（v1.1.1 審查收緊）：
+#   meta 缺 reviewer → 不適用（缺漏不得 fail-open）；前綴須 codex:（冒號防 codex-subagent 類矇混）；
+#   且 reviewer 必須恰為 codex:<校準紀錄的 model>——校準給誰、就只背書誰
+if [ "${calrc}" -eq 0 ]; then
+  if [ -z "${RVR}" ]; then
+    calrc=2; CALMSG="校準不適用：meta.json 缺 reviewer（缺漏不得沿用校準）"
+  elif ! printf '%s' "${RVR}" | grep -q '^codex:'; then
+    calrc=2; CALMSG="校準不適用：本審審查者為 ${RVR}（校準只背書 codex: 裁判）"
+  else
+    CAL_MODEL=$(grep -oE '"model" *: *"[^"]+"' "$(python3 "$GATE" --state-root)/calibration.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+    if [ "${RVR}" != "codex:${CAL_MODEL:-}" ]; then
+      calrc=2; CALMSG="校準不適用：reviewer=${RVR} ≠ codex:${CAL_MODEL:-?}（校準只背書被校準的那一位裁判）"
+    fi
+  fi
+fi
 if [ "${calrc}" -eq 0 ]; then
   pass "[D10] 裁判校準有效：${CALMSG}"
 elif [ -n "$RDIR" ] && [ -s "$RDIR/signoff.txt" ]; then

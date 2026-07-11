@@ -21,7 +21,7 @@ single implementation via `--sha`.
 
 A valid marker alone is NOT sufficient: the review must have left evidence
 in the state archive under STATE_ROOT/<key>-<basename>/ where key =
-sha256(abs path)[:16]. Evidence core (all five required): ledger.md with no
+sha256(abs path)[:16]. Evidence core (all four required): ledger.md with no
 OPEN rows, at least one non-empty r*.txt, meta.json whose "sha" field
 EQUALS the marker's sha (evidence is version-bound — old evidence cannot
 cover newly edited content), and gate4.txt containing "FAIL=0". This stops
@@ -118,7 +118,7 @@ def marker_sha(text: str) -> str:
 
 def has_review_evidence(path: str, expected_sha: str) -> bool:
     """A valid marker must be backed by the archived review trail under
-    STATE_ROOT/<key>-<basename>/ — all five: ledger.md with no OPEN rows,
+    STATE_ROOT/<key>-<basename>/ — all four: ledger.md with no OPEN rows,
     a non-empty r*.txt, meta.json whose "sha" equals the marker's sha
     (version binding: stale archives cannot cover re-edited content),
     gate4.txt containing FAIL=0. Missing/mismatched evidence -> treat as
@@ -230,6 +230,37 @@ def _block_reason(unreviewed: list[tuple[str, str]]) -> str:
     )
 
 
+def _codex_config_toplevel(key: str) -> str:
+    """Read a top-level `key = "..."` from config.toml under CODEX_HOME.
+    Stops at the first [section] header — values inside inactive TOML tables
+    (profiles, marketplaces…) must never masquerade as the active judge
+    (v1.1.1 review finding). No env override in production."""
+    cfg = os.path.join(
+        os.environ.get("CODEX_HOME", os.path.expanduser("~/.codex")), "config.toml"
+    )
+    try:
+        with open(cfg, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if re.match(r"\s*\[", line):
+                    break  # 頂層區結束
+                m = re.match(r'\s*' + re.escape(key) + r'\s*=\s*"([^"]+)"', line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return ""
+
+
+def current_judge_model() -> str:
+    return _codex_config_toplevel("model")
+
+
+def current_judge_effort() -> str:
+    """Reasoning effort is part of the judge's identity — xhigh and low are
+    materially different reviewers. Absent line -> 'default'."""
+    return _codex_config_toplevel("model_reasoning_effort") or "default"
+
+
 def calibration_state() -> tuple[bool, str]:
     """Is the judge's gold-set calibration currently trustworthy?"""
     import datetime
@@ -258,9 +289,28 @@ def calibration_state() -> tuple[bool, str]:
     except Exception:
         cur = ""  # codex 不可得時不以版本否決（缺席由 probe 另行處理）
     rec = str(c.get("codex_version", ""))
-    if cur and rec and cur != rec:
+    if not rec:
+        return False, "校準紀錄缺 codex_version——裁判身分三要素（CLI×model×effort）不得缺席"
+    if not cur:
+        return False, "無法取得現行 codex 版本——身分無法驗證即視為無效（fail-closed）"
+    if cur != rec:
         return False, f"codex 版本已變（{rec} → {cur}），需重校準"
-    return True, f"有效（{c.get('date', '?')}，{rec or '版本未記'}，{age} 天前）"
+    # 裁判「模型」綁定——換模型＝換裁判，即使 CLI 版本沒變（2026-07 換 5.6 sol 時補上的洞）
+    cur_model = current_judge_model()
+    rec_model = str(c.get("model", ""))
+    if not rec_model:
+        return False, "校準紀錄缺 model 欄（舊格式）——需以現行裁判重校準"
+    if not cur_model:
+        return False, "現行環境無明確裁判模型（config.toml 缺 model=）——無法驗證裁判一致性"
+    if cur_model != rec_model:
+        return False, f"裁判模型已變（{rec_model} → {cur_model}），需重校準"
+    rec_effort = str(c.get("effort", ""))
+    if not rec_effort:
+        return False, "校準紀錄缺 effort 欄（舊格式）——推理強度是裁判身分的一部分，需重校準"
+    cur_effort = current_judge_effort()
+    if cur_effort != rec_effort:
+        return False, f"裁判推理強度已變（{rec_effort} → {cur_effort}），需重校準"
+    return True, f"有效（{c.get('date', '?')}，{rec or '版本未記'}／{rec_model}@{rec_effort}，{age} 天前）"
 
 
 def main() -> int:

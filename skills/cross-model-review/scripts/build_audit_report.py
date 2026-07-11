@@ -78,7 +78,21 @@ def main():
     L.append("## 異議帳本（Gate 2 ledger）")
     L.append(ledger.strip() if ledger else "（無 ledger.md——Gate 2 未落盤，不合協定）")
 
-    if verdict != "approved":
+    if verdict == "arbitrated":
+        L.append("")
+        L.append("## 仲裁結果（人類裁決紀錄）")
+        arb_rows = []
+        if ledger:
+            arb_rows = [ln for ln in ledger.splitlines() if "ARBITRATED" in ln]
+        if arb_rows:
+            L += [f"- {r.strip()}" for r in arb_rows]
+        else:
+            L.append("- （ledger 無 ARBITRATED 列——仲裁紀錄不完整，請人工核對）")
+        signoff = read(os.path.join(rdir, "signoff.txt"))
+        L.append("")
+        L.append("### 使用者簽核原文")
+        L.append(signoff.strip() if signoff else "（無 signoff.txt——仲裁 finalize 必須附簽核）")
+    elif verdict != "approved":
         L.append("")
         L.append("## 待人類裁決（OPEN 項）")
         L.append("下列每項請指名裁決（R3：單獨「好／OK」不算核准）：")
