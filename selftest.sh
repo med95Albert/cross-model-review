@@ -18,6 +18,12 @@ json.dump({"date": sys.argv[2], "codex_version": sys.argv[4], "overall": sys.arg
            "model": sys.argv[5], "effort": sys.argv[6], "valid_days": 30, "cases": {}}, open(sys.argv[1], "w"))
 PY
 }
+# 無 codex 的環境：墊一個測試 shim 供「版本紀錄」類案例使用；
+# M5i 的「codex 不可得」案例以剝離 PATH（/usr/bin:/bin）執行，不受 shim 影響。
+if ! command -v codex >/dev/null 2>&1; then
+  mkdir -p "$T/bin"; printf '#!/bin/sh\necho "codex-cli 0.0.0-selftest"\n' > "$T/bin/codex"; chmod +x "$T/bin/codex"
+  export PATH="$T/bin:$PATH"
+fi
 CV=$(codex --version 2>/dev/null | head -1)
 NOW=$(python3 -c "import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'))")
 OLD=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=45)).isoformat(timespec='seconds'))")

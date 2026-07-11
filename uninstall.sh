@@ -27,7 +27,8 @@ if isinstance(hooks, dict) and isinstance(hooks.get("Stop"), list):
         if not isinstance(g, dict):
             new.append(g); continue
         kept = [h for h in g.get("hooks", [])
-                if "review-gate.py" not in str((h or {}).get("command", ""))]
+                if not ("review-gate.py" in str((h or {}).get("command", ""))
+                        and "cross-model-review" in str((h or {}).get("command", "")))]
         if kept:
             g = {**g, "hooks": kept}
             new.append(g)

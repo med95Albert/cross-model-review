@@ -39,9 +39,9 @@ cp "${SKILL_SRC}/SKILL.md" "${SKILL_SRC}/CHANGELOG.md" "${SKILL_DEST}/"
 cp "${SKILL_SRC}/scripts/"*.py "${SKILL_SRC}/scripts/"*.sh "${SKILL_DEST}/scripts/"
 rm -rf "${SKILL_DEST}/scripts/gold-seed"
 cp -R "${SKILL_SRC}/scripts/gold-seed" "${SKILL_DEST}/scripts/"
-cp "${SELF_DIR}/uninstall.sh" "${SELF_DIR}/selftest.sh" "${SKILL_DEST}/" 2>/dev/null || true
+cp "${SELF_DIR}/uninstall.sh" "${SELF_DIR}/selftest.sh" "${SELF_DIR}/LICENSE" "${SKILL_DEST}/" 2>/dev/null || true
 chmod +x "${SKILL_DEST}/uninstall.sh" "${SKILL_DEST}/selftest.sh" 2>/dev/null || true
-say "✓ skill 已複製到 ${SKILL_DEST}（含 uninstall.sh／selftest.sh 常駐維運工具）"
+say "✓ skill 已複製到 ${SKILL_DEST}（含 uninstall.sh／selftest.sh 維運工具與 LICENSE）"
 chmod +x "${SKILL_DEST}/scripts/"*.sh "${SKILL_DEST}/scripts/"*.py
 
 mkdir -p "${STATE_DIR}"
@@ -73,7 +73,11 @@ for group in stop:
     if not isinstance(group, dict):
         continue
     for h in group.get("hooks", []):
-        if isinstance(h, dict) and "review-gate.py" in str(h.get("command", "")):
+        if not isinstance(h, dict):
+            continue
+        c = str(h.get("command", ""))
+        # 雙子串比對：只認本套件的 hook，不動第三方同名腳本
+        if "review-gate.py" in c and "cross-model-review" in c:
             h["command"] = cmd
             found = True
 if not found:
