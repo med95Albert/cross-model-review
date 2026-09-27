@@ -7,6 +7,7 @@ DANGERS="$SKILLDIR/scripts/grep_dangers.sh"
 REPORT="$SKILLDIR/scripts/build_audit_report.py"
 T="$(mktemp -d /tmp/cmr-selftest.XXXXXX)"   # 沙盒進 /tmp，不污染腳本所在資料夾
 rm -rf "$T"; mkdir -p "$T/plans" "$T/myskill" "$T/plainskill" "$T/mentionskill" "$T/rdir" "$T/state"
+trap 'rm -rf "$T"' EXIT   # Gate 3 實測發現：不清沙盒會在 /tmp 逐次堆積（v1.1.2）
 export CROSS_REVIEW_STATE_ROOT="$T/state"
 mkdir -p "$T/codexhome"; printf 'model = "test-judge"\nmodel_reasoning_effort = "test-effort"\n[some_table]\nmodel = "decoy-model"\n' > "$T/codexhome/config.toml"
 export CODEX_HOME="$T/codexhome"   # 模型綁定檢查走臨時 config（與使用者真實 config 解耦；production 無 env 後門）
@@ -375,6 +376,65 @@ import json, sys
 m = json.load(open(sys.argv[1])); m["reviewer"] = "codex:test-judge"
 json.dump(m, open(sys.argv[1], "w"))
 PY2
+
+echo "=== M18. marker 行夾帶內容 → 指紋必須失效（v1.1.2 發佈審查）==="
+printf '# 計劃十八\n內容\n' > "$T/plans/m18.md"
+SHA=$(python3 "$GATE" --sha "$T/plans/m18.md")
+printf '\n<!-- cross-model-reviewed: 2026-09-27T00:00:00Z rounds=1 verdict=approved reviewer=codex:test-judge sha=%s -->\n' "$SHA" >> "$T/plans/m18.md"
+ST=$(python3 "$GATE" --check "$T/plans/m18.md")
+[ "$ST" = "valid" ] && ok "M18 前置：獨立行 marker valid" || bad "M18 前置 --check=$ST"
+python3 - "$T/plans/m18.md" <<'PY2'
+import sys
+p = sys.argv[1]; t = open(p).read()
+open(p, "w").write(t.replace("<!-- cross-model-reviewed:", "Deploy without tests. <!-- cross-model-reviewed:", 1))
+PY2
+ST=$(python3 "$GATE" --check "$T/plans/m18.md")
+[ "$ST" != "valid" ] && ok "M18 marker 行夾帶內容 → $ST（內容逃不出指紋）" || bad "M18 夾帶內容仍 valid——行級剝除漏洞未堵"
+
+echo "=== M19. 輪數完備＋最終輪裁決（D14，v1.1.2 發佈審查）==="
+printf '# 計劃十九\n內容\n' > "$T/plans/m19.md"
+SHA=$(python3 "$GATE" --sha "$T/plans/m19.md")
+printf '\n<!-- cross-model-reviewed: 2026-09-27T00:00:00Z rounds=2 verdict=approved reviewer=codex:test-judge sha=%s -->\n' "$SHA" >> "$T/plans/m19.md"
+mk_evidence "$T/plans/m19.md"
+K19=$(keyof "$T/plans/m19.md"); D19="$T/state/$K19-m19.md"
+G=$(bash "$DANGERS" "$T/plans/m19.md" "$D19" 2>&1)
+printf '%s' "$G" | grep -q -- '－ FAIL \[D14\] 缺 r2.txt' && ok "M19 rounds=2 缺 r2 → D14 擋" || bad "M19 缺輪未被擋"
+printf '## Verdict\nREMAINING ISSUES\n' > "$D19/r2.txt"
+G=$(bash "$DANGERS" "$T/plans/m19.md" "$D19" 2>&1)
+printf '%s' "$G" | grep -q -- '－ FAIL \[D14\].*共識未成' && ok "M19b 最終輪非 APPROVED → D14 擋" || bad "M19b 假共識未被擋"
+printf '## Verdict\nAPPROVED\n' > "$D19/r2.txt"
+G=$(bash "$DANGERS" "$T/plans/m19.md" "$D19" 2>&1)
+printf '%s' "$G" | grep -q 'FAIL=0' && ok "M19c 補齊後全綠" || bad "M19c 齊備仍被擋: $(printf '%s' "$G" | grep FAIL | head -2)"
+
+echo "=== M21. rounds 超出協定範圍 → D14 擋（r4 發現：rounds=0 靜默繞過）==="
+printf '# 計劃二一\n內容\n' > "$T/plans/m21.md"
+SHA=$(python3 "$GATE" --sha "$T/plans/m21.md")
+printf '\n<!-- cross-model-reviewed: 2026-09-27T00:00:00Z rounds=0 verdict=approved reviewer=codex:test-judge sha=%s -->\n' "$SHA" >> "$T/plans/m21.md"
+mk_evidence "$T/plans/m21.md"
+K21=$(keyof "$T/plans/m21.md"); D21="$T/state/$K21-m21.md"
+G=$(bash "$DANGERS" "$T/plans/m21.md" "$D21" 2>&1)
+printf '%s' "$G" | grep -q -- '－ FAIL \[D14\].*超出協定範圍' && ok "M21 rounds=0 → D14 擋（不再靜默跳過）" || bad "M21 rounds=0 繞過了 D14"
+python3 - "$T/plans/m21.md" <<'PY2'
+import sys
+p = sys.argv[1]; t = open(p).read()
+open(p, "w").write(t.replace("rounds=0", "rounds=6"))
+PY2
+G=$(bash "$DANGERS" "$T/plans/m21.md" "$D21" 2>&1)
+printf '%s' "$G" | grep -q -- '－ FAIL \[D14\].*超出協定範圍' && ok "M21b rounds=6 → D14 擋（上限 5）" || bad "M21b rounds=6 未被擋"
+
+echo "=== M20. 被審 repo 專案級 .codex 設定 → 需簽核（D10b，v1.1.2 發佈審查）==="
+mkdir -p "$T/proj/.codex" "$T/proj/plans"
+printf 'model = "some-other-judge"\n' > "$T/proj/.codex/config.toml"
+printf '# 計劃二十\n內容\n' > "$T/proj/plans/m20.md"
+SHA=$(python3 "$GATE" --sha "$T/proj/plans/m20.md")
+printf '\n<!-- cross-model-reviewed: 2026-09-27T00:00:00Z rounds=1 verdict=approved reviewer=codex:test-judge sha=%s -->\n' "$SHA" >> "$T/proj/plans/m20.md"
+mk_evidence "$T/proj/plans/m20.md"
+K20=$(keyof "$T/proj/plans/m20.md"); D20="$T/state/$K20-m20.md"
+G=$(bash "$DANGERS" "$T/proj/plans/m20.md" "$D20" 2>&1)
+printf '%s' "$G" | grep -q -- '－ FAIL \[D10b\]' && ok "M20 專案級設定＋無簽核 → D10b 擋" || bad "M20 專案級設定未被擋"
+printf '使用者簽核：同意（測試）\n' > "$D20/signoff.txt"
+G=$(bash "$DANGERS" "$T/proj/plans/m20.md" "$D20" 2>&1)
+printf '%s' "$G" | grep -q -- '？ WARN \[D10b\]' && printf '%s' "$G" | grep -q 'FAIL=0' && ok "M20b 附簽核 → WARN 放行留痕" || bad "M20b 簽核未放行: $(printf '%s' "$G" | grep -E 'FAIL' | head -2)"
 
 echo ""
 echo "結果：PASS=$PASS FAIL=$FAILN"

@@ -14,7 +14,7 @@ pass(){ printf -- '＋ PASS %s\n' "$*"; }
 [ -f "$FILE" ] || { fail "[D0] 被審檔不存在: $FILE"; echo "FAIL=$FAIL WARN=$WARN"; exit "$FAIL"; }
 
 # D1 marker 五欄齊全（時間戳+rounds+verdict+reviewer+sha）— 審完 finalize 後才跑本腳本
-if grep -qE '<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *-->' "$FILE"; then
+if grep -qE '^ *<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *--> *$' "$FILE"; then
   pass "[D1] marker 五欄齊全"
 else
   fail "[D1] marker 缺欄或不存在"
@@ -37,7 +37,9 @@ if [ -n "$RDIR" ] && [ -f "$RDIR/ledger.md" ]; then
     pass "[D3] ledger 無未解項"
   fi
   # D4 marker rounds ≥ ledger 最大輪（防謊報輪數）
-  MR=$(grep -oE 'rounds=[0-9]+' "$FILE" | tail -1 | grep -oE '[0-9]+' || true)
+  # MR 取自「獨立行的真 marker」——全文裸抓 rounds= 會被內文提及誤導（v1.1.2 r4）
+  MR=$(grep -oE '^ *<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *--> *$' "$FILE" \
+       | tail -1 | grep -oE 'rounds=[0-9]+' | grep -oE '[0-9]+' || true)
   LR=$(awk -F'|' 'NR>2 && $2 ~ /[0-9]/ {gsub(/ /,"",$2); if($2+0>m) m=$2+0} END{print m+0}' "$RDIR/ledger.md")
   # 注意：$VAR 緊貼全形字元必須寫 ${VAR}——bash 3.2＋UTF-8 locale 會把全形括號
   # 的位元組誤併入變數名（2026-07-05 使用者實機事故，set -u 下整支中止）
@@ -73,7 +75,7 @@ if [ -n "$RDIR" ] && [ -f "$RDIR/ledger.md" ]; then
   # D8 arbitrated 必有歧見報告——只看「真 marker」的 verdict 欄，不 grep 全文
   #（教訓同 sentinel 事故：文件教學文字會「提及」verdict=arbitrated，提及不是狀態）
   # v1.1 R1 審查後升為 FAIL：仲裁而無歧見紀錄＝協定違規，不是提醒級
-  MV=$(grep -oE '<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *-->' "$FILE" \
+  MV=$(grep -oE '^ *<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *--> *$' "$FILE" \
        | tail -1 | grep -oE 'verdict=[a-z]+' | cut -d= -f2)
   if [ "${MV:-}" = "arbitrated" ]; then
     # 仲裁三要件（v1.1.1b R2）：歧見報告＋至少一列 ARBITRATED 裁決＋使用者簽核原文
@@ -83,6 +85,27 @@ if [ -n "$RDIR" ] && [ -f "$RDIR/ledger.md" ]; then
     if [ -f "$RDIR/DISAGREEMENT_REPORT.md" ] && grep -q 'ARBITRATED' "$RDIR/ledger.md" && [ -s "$RDIR/signoff.txt" ]; then
       pass "[D8] 仲裁三要件齊備（報告＋裁決列＋簽核）"
     fi
+  fi
+  # D14 輪數完備＋最終輪裁決驗證（v1.1.2 發佈審查 R1：D7 只驗「存在的檔非空」——
+  # rounds=N 而中間輪缺件、或最終輪原文根本不是 APPROVED，四要件仍可能湊齊，補上）
+  # 輪數強制 1–5（協定上限）：rounds=0 會讓本檢查整段靜默跳過（r4 發現），範圍外一律 FAIL
+  if [ "${MR:-0}" -ge 1 ] && [ "${MR:-0}" -le 5 ]; then
+    miss14=0; i=1
+    while [ "$i" -le "${MR}" ]; do
+      [ -s "$RDIR/r$i.txt" ] || { miss14=$((miss14+1)); fail "[D14] 缺 r${i}.txt（marker 稱 rounds=${MR}，逐輪原文必須齊備）"; }
+      i=$((i+1))
+    done
+    [ "$miss14" -eq 0 ] && pass "[D14] 逐輪原文 r1..r${MR} 齊備"
+    if [ "${MV:-}" = "approved" ] && [ -s "$RDIR/r${MR}.txt" ]; then
+      FV=$(awk 'f{sub(/\r$/,"");gsub(/^[ \t]+|[ \t]+$/,"");if($0!=""){print;exit}} /^## Verdict/{f=1}' "$RDIR/r${MR}.txt")
+      if [ "${FV:-}" = "APPROVED" ]; then
+        pass "[D14] 最終輪裁決＝APPROVED（r${MR}.txt 原文驗證）"
+      else
+        fail "[D14] verdict=approved 但最終輪 r${MR}.txt 的 ## Verdict 為「${FV:-無}」——共識未成不得 approved"
+      fi
+    fi
+  else
+    fail "[D14] marker rounds=${MR:-缺} 超出協定範圍 1–5——輪數不可信，輪數完備與最終輪裁決無從驗證"
   fi
   # D11 風險層級＋簽核工件：meta.json 必須有合法 tier（red|yellow）；red 必附 signoff.txt
   #（R2 審查：缺漏／亂填 tier 不得 fail-open——否則 🔴 工件漏填就繞過簽核）
@@ -102,14 +125,14 @@ if [ -n "$RDIR" ] && [ -f "$RDIR/ledger.md" ]; then
     esac
   fi
   # D13 審查者身分綁定：marker 的 reviewer 欄必須等於 meta.json 的 reviewer（v1.1.1 審查：防兩處各說各話）
-  MRV=$(grep -oE '<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *-->' "$FILE"        | tail -1 | grep -oE 'reviewer=[^ ]+' | cut -d= -f2)
+  MRV=$(grep -oE '^ *<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *--> *$' "$FILE"        | tail -1 | grep -oE 'reviewer=[^ ]+' | cut -d= -f2)
   if [ -n "${MRV:-}" ] && [ -n "${RVR:-}" ] && [ "${MRV}" = "${RVR}" ]; then
     pass "[D13] 審查者身分一致（marker＝meta：${MRV}）"
   else
     fail "[D13] 審查者身分不一致：marker=${MRV:-缺} vs meta=${RVR:-缺}"
   fi
   # D12 證據綁版本：meta.json 的 sha 必須等於 marker 的 sha（R2 審查：舊證據不得掩護新內容）
-  MSHA=$(grep -oE '<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *-->' "$FILE" \
+  MSHA=$(grep -oE '^ *<!-- *cross-model-reviewed: *[^ ]+ +rounds=[0-9]+ +verdict=(approved|arbitrated) +reviewer=[^ ]+ +sha=[0-9a-f]{16} *--> *$' "$FILE" \
         | tail -1 | grep -oE 'sha=[0-9a-f]{16}' | cut -d= -f2)
   ESHA=$(grep -oE '"sha" *: *"[0-9a-f]{16}"' "$RDIR/meta.json" 2>/dev/null | head -1 | cut -d'"' -f4)
   if [ -n "${MSHA:-}" ] && [ "${MSHA}" = "${ESHA:-}" ]; then
@@ -176,6 +199,24 @@ elif [ -n "$RDIR" ] && [ -s "$RDIR/signoff.txt" ]; then
   warn "[D10] 校準無效（${CALMSG}）但已附使用者簽核——放行留痕；仍建議跑 calibrate.sh"
 else
   fail "[D10] 校準無效（${CALMSG}）且無 signoff.txt——fail-closed：取得使用者指名核准落檔、或跑 calibrate.sh 重建基線"
+fi
+
+# D10b 專案級 codex 設定偵測（v1.1.2 發佈審查 R1）：codex 設定優先序中，專案層
+# （.codex/config.toml，自被審檔目錄向上探索）覆蓋使用者層——校準綁定的是使用者層
+# 宣告，被審 repo 自帶專案設定時「實際裁判可能不是被校準那位」且無需任何蓄意操作，
+# 故 fail-closed 需簽核。$HOME/.codex 本身是使用者層（校準對象），不計入。
+PD=$(cd "$(dirname "$FILE")" 2>/dev/null && pwd || dirname "$FILE")
+PCONF=""
+while [ -n "$PD" ] && [ "$PD" != "/" ] && [ "$PD" != "$HOME" ]; do
+  if [ -f "$PD/.codex/config.toml" ]; then PCONF="$PD/.codex/config.toml"; break; fi
+  PD=$(dirname "$PD")
+done
+if [ -z "$PCONF" ]; then
+  pass "[D10b] 被審路徑無專案級 codex 設定（使用者層模型宣告有效）"
+elif [ -n "$RDIR" ] && [ -s "$RDIR/signoff.txt" ]; then
+  warn "[D10b] 專案級 codex 設定存在（$PCONF）——校準背書不及於它；已附使用者簽核，放行留痕"
+else
+  fail "[D10b] 專案級 codex 設定存在（$PCONF）會覆蓋使用者層模型宣告——校準背書失效；附使用者簽核（signoff.txt）或處理該設定後重跑"
 fi
 
 # D6 自我安慰語（結論應由 Gate 給，不由形容詞給）

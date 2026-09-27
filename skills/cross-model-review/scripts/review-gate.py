@@ -67,6 +67,10 @@ MARKER_RE = re.compile(
     r"verdict=(approved|arbitrated)\s+reviewer=(\S+)\s+sha=([0-9a-f]{16})\s*-->",
     re.IGNORECASE,
 )
+# marker 只在「獨立一行」時算數（與 sentinel 同一教義）：與內容同行的 marker 一律
+# 視為內容——否則在 marker 行前面塞字，字會逃出 content_sha 而 marker 照樣有效
+# （v1.1.2 發佈審查 R1 實證：行級剝除讓夾帶內容不改指紋）
+MARKER_LINE_RE = re.compile(r"^\s*<!--\s*cross-model-reviewed:[^<>]*-->\s*$", re.IGNORECASE)
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 MAX_BYTES = 2_000_000  # bigger reviewed files fail open
 MAX_TRANSCRIPT_BYTES = 30_000_000  # scan the whole transcript up to this cap
@@ -89,10 +93,28 @@ def _read_text(path: str):
 def content_sha(text: str) -> str:
     # Trailing blank lines are excluded so that appending the marker (which
     # adds a separating newline) cannot itself invalidate the sha.
-    kept = [ln for ln in text.split("\n") if not MARKER_RE.search(ln)]
+    # 只剝「獨立一行」的 marker：剝除規則必須與辨識規則（_marker_matches）完全一致。
+    kept = [
+        ln
+        for ln in text.split("\n")
+        if not (MARKER_LINE_RE.match(ln) and MARKER_RE.search(ln))
+    ]
     while kept and kept[-1].strip() == "":
         kept.pop()
     return hashlib.sha256("\n".join(kept).encode("utf-8")).hexdigest()[:16]
+
+
+def _marker_matches(text: str):
+    """List of marker matches, counting only standalone marker lines —
+    the recognition rule and content_sha's strip rule must be the same set,
+    or content could sit on a recognized-but-stripped line and escape the sha."""
+    out = []
+    for ln in text.split("\n"):
+        if MARKER_LINE_RE.match(ln):
+            m = MARKER_RE.search(ln)
+            if m:
+                out.append(m)
+    return out
 
 
 def is_watched(path: str, text: str | None) -> bool:
@@ -104,7 +126,7 @@ def is_watched(path: str, text: str | None) -> bool:
 
 def marker_state(text: str) -> str:
     """State of the LAST marker in text: valid | stale | missing."""
-    matches = list(MARKER_RE.finditer(text))
+    matches = _marker_matches(text)
     if not matches:
         return "missing"
     return "valid" if matches[-1].group(4).lower() == content_sha(text) else "stale"
@@ -112,7 +134,7 @@ def marker_state(text: str) -> str:
 
 def marker_sha(text: str) -> str:
     """The LAST marker's sha field (lowercase), or '' if no marker."""
-    matches = list(MARKER_RE.finditer(text))
+    matches = _marker_matches(text)
     return matches[-1].group(4).lower() if matches else ""
 
 

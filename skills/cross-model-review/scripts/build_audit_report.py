@@ -9,6 +9,7 @@ is missing so gaps are visible instead of silent):
   meta.json  {"file","reviewer","rounds","verdict","started","finished"}
   ledger.md  round-by-round issue ledger (Gate 2)
   r<N>.txt   reviewer output per round
+  a<N>.txt   author (Claude) message per round (rounds 2+; round 1 is the fixed prompt)
   gate4.txt  saved grep_dangers output
 
 Writes AUDIT_REPORT.md (verdict=approved) or DISAGREEMENT_REPORT.md
@@ -110,6 +111,34 @@ def main():
             "裁決選項：ACCEPT-CLAUDE（維持原文）／ACCEPT-REVIEWER（照審查者意見改）"
             "／其他明確指示。"
         )
+
+    if verdict != "approved":
+        # 仲裁卷宗必須含雙方逐輪原文——ledger 摘要不足以支撐人類裁決
+        L.append("")
+        L.append("## 歧見全文（雙方逐輪原文）")
+        nums = sorted(
+            {
+                int(m.group(1))
+                for p in glob.glob(os.path.join(rdir, "[ar][0-9]*.txt"))
+                if (m := re.match(r"[ar](\d+)\.txt$", os.path.basename(p)))
+            }
+        )
+        if not nums:
+            L.append("（無任何輪次檔——證據不齊，請人工核對）")
+        for n in nums:
+            a = read(os.path.join(rdir, f"a{n}.txt"))
+            r = read(os.path.join(rdir, f"r{n}.txt"))
+            L.append(f"### Round {n} ・ Claude（作者方）")
+            if a:
+                L.append(a.strip())
+            elif n == 1:
+                L.append("（round 1 為固定證偽 prompt，無作者方立場檔——屬協定設計）")
+            else:
+                L.append(f"（無 a{n}.txt——作者方原文未落盤，此輪僅有單方說法）")
+            L.append("")
+            L.append(f"### Round {n} ・ 審查者")
+            L.append(r.strip() if r else f"（無 r{n}.txt——審查者原文缺件）")
+            L.append("")
 
     L.append("")
     L.append("## Gate 4（grep_dangers）")

@@ -3,7 +3,7 @@ name: cross-model-review
 description: "跨模型互審閘門：對 plan/spec/SKILL.md 做對抗式文件審查（codex 優先、fresh subagent 備援），逐輪到共識；5 輪僵局交人裁。完成後寫入 sha 綁定 marker 供 Stop hook 放行。Trigger on: 跨模型審查, 叫 codex 審, cross review, 互審這份, 這份 plan 給另一個模型看, Stop hook 攔截點名未審檔案時, tier-s-agent-builder Step 9.5 分流。分工：引用驗證→medical-citation；設計新 skill→tier-s-agent-builder；本 skill 只管文件級對抗審查與閘門。"
 ---
 
-# cross-model-review v1.1.1 ・ 跨模型互審閘門
+# cross-model-review v1.1.2 ・ 跨模型互審閘門
 
 <!-- cross-model-gated -->
 
@@ -41,7 +41,7 @@ Hook 監看：任何 `plans/`、`specs/` 目錄下的 `.md`；以及**掛了 sen
 | 1 | 審查者資格探測＋校準姿態（黃金集 fail-closed，Step 1.5） | `scripts/reviewer-probe.sh`＋`scripts/calibrate.sh` | 阻擋/升級簽核 |
 | 2 | 異議帳本落盤 `$DIR/ledger.md` | 磁碟 markdown（非對話記憶） | 阻擋 |
 | 3 | 逐輪對抗審查（本體） | codex CLI（跨模型）／fresh subagent（跨 context） | 阻擋 |
-| 4 | deterministic 複核（D1–D13：CONCEDE 計數防代筆、校準狀態與適用性、tier＋簽核、證據綁版本、審查者身分綁定） | `scripts/grep_dangers.sh`（grep/test/sha256） | 阻擋 |
+| 4 | deterministic 複核（D1–D14：CONCEDE 計數防代筆、校準狀態與適用性、tier＋簽核、證據綁版本、審查者身分綁定、輪數完備與最終輪裁決、專案級 codex 設定偵測） | `scripts/grep_dangers.sh`（grep/test/sha256） | 阻擋 |
 | 5 | 人類檢查點（僵局裁決、🔴 勾選） | 人類＋read-back | 阻擋(🔴)/警示(🟡) |
 
 ## Pipeline
@@ -76,7 +76,9 @@ probe 同時回報 **POSTURE**（裁判校準姿態）：`GREEN`＝校準有效�
 REVIEW_PATH="<被審檔絕對路徑>"
 ROOT="<被審檔所屬 git repo 根；無 repo 則用檔案所在目錄>"
 KEY=$(printf '%s' "$REVIEW_PATH" | { command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum; } | cut -c1-16)
-DIR=$(mktemp -d "/tmp/cross-review.XXXXXXXX")   # 每審全新目錄
+# 同檔並行鎖：mkdir 是原子操作——先檢查再寫入有 TOCTOU 競態，兩個同時啟動會都看到「不存在」
+mkdir "/tmp/cross-review.$KEY.lock" 2>/dev/null || { echo "同一工件已有進行中審查（lock /tmp/cross-review.$KEY.lock；指標 → $(cat "/tmp/cross-review.$KEY.dir" 2>/dev/null || echo 無)）——同檔不並行，否則 round 2+ 會 resume 到別審的 thread；確認是殘留（前審 crash 未收尾）後 rmdir 該 lock、rm 指標檔再開審"; exit 1; }
+DIR=$(mktemp -d "/tmp/cross-review.XXXXXXXX")   # 每審全新目錄；只有持鎖方可發布指標
 printf '%s' "$DIR" > "/tmp/cross-review.$KEY.dir"   # round 2+ 用 cat 讀回
 date -u +%Y-%m-%dT%H:%M:%SZ > "$DIR/started"
 ```
@@ -147,8 +149,8 @@ grep -m1 '"thread.started"' "$DIR/r1.events.jsonl" | sed -E 's/.*"thread_id":"([
 
 ```bash
 DIR=$(cat "/tmp/cross-review.$KEY.dir"); THREAD_ID=$(cat "$DIR/thread_id")
-codex exec --sandbox read-only --skip-git-repo-check -C "$ROOT" -o "$DIR/r<N>.txt" \
-  resume "$THREAD_ID" - <<'CODEX_EOF'
+# 我方訊息先落盤 a<N>.txt 再餵 codex——作者側逐輪原文是仲裁卷宗的一半，不落盤人裁就只剩單方說法
+cat > "$DIR/a<N>.txt" <<'CODEX_EOF'
 Round <N> of 5. I responded to your previous round:
 
 FIXED (re-read the document, these are edited):
@@ -170,10 +172,12 @@ APPROVED  (or)  REMAINING ISSUES
 ## Remaining or new issues (omit if APPROVED)
 - [issue]: [why]
 CODEX_EOF
+codex exec --sandbox read-only --skip-git-repo-check -C "$ROOT" -o "$DIR/r<N>.txt" \
+  resume "$THREAD_ID" - < "$DIR/a<N>.txt"
 rc=$?; [ "$rc" -ne 0 ] && { echo "codex FAILED (exit $rc) — 不讀輸出、不寫 marker"; exit "$rc"; }
 ```
 
-（subagent 版：SendMessage 同一 agent，同文；回覆存 `$DIR/r<N>.txt`。）
+（subagent 版：SendMessage 同一 agent，同文；我方訊息一樣存 `$DIR/a<N>.txt`、回覆存 `$DIR/r<N>.txt`。）
 
 MAINTAIN 的處理：下一輪**要嘛給更利的論證，要嘛誠實投降修掉**；禁止假裝已解決、禁止替審查者代筆 CONCEDE。APPROVED → Step 6；到第 5 輪仍有 OPEN → Step 7。
 
@@ -204,17 +208,20 @@ python3 $SDIR/scripts/build_audit_report.py "$DIR"
 STATE_ROOT=$(python3 $SDIR/scripts/review-gate.py --state-root)   # 單一事實來源
 STATE="${STATE_ROOT}/$KEY-$(basename "$REVIEW_PATH")"
 mkdir -p "$STATE"
+# 前一批審查證據整批移入不可變快照——同檔重審不混批（hook 只讀頂層＝現行審；歷史照留，可建不可刪）
+find "$STATE" -maxdepth 1 -type f | grep -q . && { PREV="$STATE/prev-$(date -u +%Y%m%dT%H%M%SZ)"; mkdir -p "$PREV"; find "$STATE" -maxdepth 1 -type f -exec mv {} "$PREV/" \; ; }
 cp "$DIR/ledger.md" "$DIR/meta.json" "$DIR/gate4.txt" "$STATE/"
-cp "$DIR"/r*.txt "$STATE/" && cp "$DIR"/*REPORT*.md "$DIR/signoff.txt" "$STATE/" 2>/dev/null
+find "$DIR" -maxdepth 1 \( -name 'r*.txt' -o -name 'a*.txt' -o -name '*REPORT*.md' -o -name 'signoff.txt' \) -exec cp {} "$STATE/" \;   # find 而非裸 glob：zsh 無匹配會 nomatch 中斷整行；缺件由 hook 驗出
 printf '%s | %s | %s | rounds=%s | %s\n' "$(date -u +%F)" "$REVIEW_PATH" "<審查者id>" "<N>" "<approved|arbitrated>" \
   >> "${STATE_ROOT}/reviews.log"
+rm -f "/tmp/cross-review.$KEY.dir"; rmdir "/tmp/cross-review.$KEY.lock" 2>/dev/null || true   # 審結收指標＋釋放同檔並行鎖（鎖不在＝舊協定開的審，容忍）
 ```
 
 grep_dangers FAIL>0 → 修完重跑（改內容後 marker 失效屬正常：重算 sha 重寫 marker）。WARN → 逐條 defend 寫進回報。歸檔完成後回報使用者：輪數、審查者原始主要疑慮 1-3 條、改了什麼、我方 pushback 而審查者讓步的（展示判斷）、我方被說服的（透明——但注意：**被說服而改〔RESOLVED-CAPITULATED〕不得當作「審查有效」的證據**，讓步可能只是讓步）。**🔴 工件或 POSTURE=RED**：附 AUDIT_REPORT 路徑，等使用者勾選才算完成。
 
 ### Step 7｜Deadlock（第 5 輪仍未共識）
 
-1. ledger 未解項全標 `OPEN`；meta verdict 記 `deadlock`；跑 `build_audit_report.py`（自動產 DISAGREEMENT_REPORT，含雙方立場與裁決欄）。
+1. ledger 未解項全標 `OPEN`；meta verdict 記 `deadlock`；跑 `build_audit_report.py`（自動產 DISAGREEMENT_REPORT，含裁決欄＋**雙方逐輪原文附錄**——renderer 讀 `a*.txt`（我方）與 `r*.txt`（審查者）全文入卷，人裁不拿殘卷）。
 2. 呈給使用者**指名裁決**（R3：單獨「好／OK」不算）。逐項採 ACCEPT-CLAUDE／ACCEPT-REVIEWER／其他指示；照裁決改檔、ledger 改 `ARBITRATED-*`；**把裁決原文＋日期寫入 `$DIR/signoff.txt`——仲裁＝人裁，簽核不分 tier／姿態一律必附（D8 驗三要件：報告＋裁決列＋簽核）**。
 3. finalize 同 Step 6，但 **verdict 三處一致寫 `arbitrated`**：marker、`meta.json`、`reviews.log` 該列。順序：先寫 meta（verdict=arbitrated）再跑 `build_audit_report.py`——renderer 依 meta.verdict 自動產 DISAGREEMENT_REPORT（D8 驗其存在，缺＝FAIL）。報告留存歧見全文。
 4. **校準飛輪（v1.1）**：仲裁歸檔時額外寫 `$STATE_ROOT/gold-candidates/<KEY>-<日期>.md`——案情摘要、雙方立場、人類裁決、標記 `provenance: human-independent`。這是「人類獨立定讞」等級的黃金題材（🔴 簽核時使用者**推翻** APPROVED 的案例同樣要寫一筆）。累積後由使用者手動挑入 `gold/`；「人只是同意 AI」的案例不算獨立訊號、不得入集。
@@ -280,5 +287,5 @@ marker `--check` 印 `valid`（read-back）＋ grep_dangers `FAIL=0` 且 WARN �
 5. **token 成本真實**——每審一次多輪推理。值不值由風險分級決定；🟢 就別掛 sentinel。
 6. **閘門只監看 Write/Edit 類工具的檔案寫入**——經 shell／腳本／批次工具寫出的監看檔不會被攔（解析任意 shell 指令不可靠，寧可明示範圍也不給假安全感）。工作流若用腳本產 plan/spec，須自覺觸發本 skill。
 7. **跨模型「降低」而非「消除」共同盲點**——兩個模型可能一起錯（同行實測：在人類唯一獨立判斷的題上，Claude 與 Codex 一起判錯）。校準與閘門都不改變這件事：**真值在人**，這正是 Gate 5 與黃金集都以人類定讞為錨的原因。
-8. **模型一致性驗的是「宣告」不是「執行取證」**——校準與 D10 比對的是 config.toml 與紀錄的宣告一致；審查執行當下實際載入的模型並未從事件流獨立取證。審查中途換模再換回這類操縱，屬「蓄意造假」範疇（見 #1），不在機械防線承諾內。
+8. **模型一致性驗的是「宣告」不是「執行取證」**——校準與 D10 比對的是 config.toml 與紀錄的宣告一致；審查執行當下實際載入的模型並未從事件流獨立取證。審查中途換模再換回這類操縱，屬「蓄意造假」範疇（見 #1），不在機械防線承諾內。v1.1.2 起 D10b 對被審 repo 的專案級 .codex 設定 fail-closed（設定優先序中它覆蓋使用者層宣告、無需蓄意即發生）；本界線不變——執行當下實際載入的模型仍非取證。
 9. **校準是「姿態級」不是「逐審級」**——calibration.json 證明的是裁判「最近、在這個版本上」可信，不是本次判決正確。hook 本身不讀校準（保持簡單、fail-open），但 fail-closed 是**機械的**：校準無效或 🔴 而無 signoff.txt ⇒ D10/D11 FAIL ⇒ gate4 無法 FAIL=0 ⇒ 證據不齊 ⇒ hook 不放行——強制經由既有證據鏈流動。

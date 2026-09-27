@@ -1,6 +1,6 @@
 {
   "name": "cross-model-review",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "跨模型互審閘門 — Claude 寫的 plan/spec/SKILL.md 由另一個模型（OpenAI Codex）證偽式逐輪審查，共識才放行；Stop hook 強制、裁判黃金集校準 fail-closed。",
   "author": {
     "name": "楊為傑",

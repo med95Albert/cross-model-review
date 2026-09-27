@@ -41,7 +41,7 @@ git clone https://github.com/med95Albert/cross-model-review /tmp/cmr && bash /tm
 | Python 3 | 必要 |
 | OpenAI Codex CLI（已登入） | 建議——跨模型審查的另一方；沒有它時，一般（🟡）文件降級為「同模型、新視角」subagent 審查（仍可用，APPROVED 後需你簽核），高風險（🔴）文件不自動降級——會停下請你決定 |
 
-> 校準前請確認 `~/.codex/config.toml` 有明確的 `model = "..."`——校準紀錄綁定裁判模型（codex 實際用誰、就記誰、就驗誰），config 無明確模型時 calibrate.sh 直接拒跑、校準檢查一律視為無效。
+> 校準前請確認 `~/.codex/config.toml` 有明確的 `model = "..."`——校準紀錄綁定裁判模型的**使用者層宣告**（config 記誰、就驗誰），config 無明確模型時 calibrate.sh 直接拒跑、校準檢查一律視為無效。被審 repo 若自帶專案級 `.codex/config.toml`（codex 設定優先序中它覆蓋使用者層，實際裁判可能因此不是被校準那位），Gate 4 會 fail-closed 要求你簽核後才放行。
 
 ## 裁判校準（v1.1，建議首跑）
 
@@ -51,7 +51,7 @@ git clone https://github.com/med95Albert/cross-model-review /tmp/cmr && bash /tm
 
 九成情境不用主動呼叫：Claude 用 Write/Edit 寫了 `plans/`、`specs/` 下的 `.md`，或含獨立一行 `<!-- cross-model-gated -->` 的 SKILL.md，回合結束自動被攔下審查。手動點名：「叫 codex 審這份 `<路徑>`」。納管既有 skill：在它的 SKILL.md 加獨立一行 sentinel。
 
-審查達成 APPROVED（或 5 輪僵局交你裁決）才蓋防偽標記；標記綁內容指紋，審後改一字即失效重審。放行需「有效標記＋四件歸檔證據」齊備且綁定本版內容：帳本（無未解項）、逐輪審查原文、meta（含內容指紋）、finalize 當下的 Gate 4 全綠紀錄（校準狀態與簽核要求在此時強制）。已完成的審查不因日後校準過期而追溯失效——校準約束的是「下一次審查」。
+審查達成 APPROVED（或 5 輪僵局交你裁決）才蓋防偽標記；標記綁內容指紋，審後改一字即失效重審。放行需「有效標記＋四件歸檔證據」齊備且綁定本版內容：帳本（無未解項）、逐輪審查原文（輪數齊備、最終輪裁決原文須為 APPROVED——Gate 4 機器驗）、meta（含內容指紋）、finalize 當下的 Gate 4 全綠紀錄（校準狀態與簽核要求在此時強制）。已完成的審查不因日後校準過期而追溯失效——校準約束的是「下一次審查」。
 
 ## 驗證與維運
 
@@ -70,7 +70,7 @@ bash ~/.claude/skills/cross-model-review/selftest.sh                  # 全套�
 | Stop hook | `~/.claude/settings.json` 的 `hooks.Stop`（或 plugin 自帶） |
 | 審查證據＋黃金集 | `~/.claude/cross-model-review/state/`（`CROSS_REVIEW_STATE_ROOT` 可覆蓋） |
 
-解除安裝——依安裝方式：①③ 執行 `bash ~/.claude/skills/cross-model-review/uninstall.sh`（安裝時已常駐；`--purge` 連證據一併刪除，尊重 `CROSS_REVIEW_STATE_ROOT`）；② 用 `/plugin uninstall cross-model-review@cross-model-review`（再 `/plugin marketplace remove cross-model-review`），證據目錄如要刪除需手動。
+解除安裝——依安裝方式：①③ 執行 `bash ~/.claude/skills/cross-model-review/uninstall.sh`（安裝時已常駐；`--purge` 連證據一併刪除，尊重 `CROSS_REVIEW_STATE_ROOT`）；② 用 `/plugin uninstall cross-model-review@cross-model-review`（再 `/plugin marketplace remove cross-model-review`），證據目錄如要刪除需手動。解除後除審查證據外，`settings.json` 與 `skills/` 容器本身會保留——那是 Claude Code 的共用設定結構，不屬本 skill、不會代刪（settings.json 以 JSON 語意還原，排版可能重排）。
 
 ## 誠實限制
 
@@ -84,3 +84,5 @@ MIT License ・ 環境：Claude Code × OpenAI Codex CLI
 <!-- cross-model-reviewed: 2026-07-11T04:31:49Z rounds=2 verdict=approved reviewer=subagent:claude-opus-4-8 sha=126b677cbf3d3d91 -->
 
 <!-- cross-model-reviewed: 2026-07-11T06:28:43Z rounds=3 verdict=approved reviewer=codex:gpt-5.6-sol sha=20f0979e1ad12ce0 -->
+
+<!-- cross-model-reviewed: 2026-09-27T04:05:51Z rounds=2 verdict=approved reviewer=codex:gpt-6-astra sha=66b338170456d844 -->

@@ -18,11 +18,12 @@ for f in "--json" "resume" "--output-last-message" "--sandbox" "--skip-git-repo-
   if printf '%s' "$H" | grep -q -- "$f"; then say "＋ 支援 $f"; else say "－ 不支援 $f"; ok=0; fi
 done
 
-LS=$(codex login status 2>&1)
-if printf '%s' "$LS" | grep -qi "logged in"; then
+LS=$(codex login status 2>&1); lrc=$?
+# 判定用 exit code——字串比對會把 "Not logged in" 也比中（Gate 3 隔離實測誤報，v1.1.2 修）
+if [ "$lrc" -eq 0 ]; then
   say "＋ 登入：$(printf '%s' "$LS" | head -1)"
 else
-  say "？ 登入狀態不明（$(printf '%s' "$LS" | head -1)）——round 1 失敗即降級"
+  say "？ 未登入或狀態不明（$(printf '%s' "$LS" | head -1)）——round 1 失敗即降級"
 fi
 
 # 裁判校準姿態（黃金集，見 calibrate.sh）：RED = fail-closed，所有工件視同 🔴
